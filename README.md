@@ -24,7 +24,7 @@
 5. 重试交换机Exchange设置`死信交换机(Dead Letter Exchange)`，消息过期后自动转发到业务交换机(Exchange)。
 6. `WebApi`可以根据消息标识MessageId、时间戳Timestamp以及头信息Headers在MongoDB中对消息进行检索或重试。
 
-**注：选择MongoDB作为存储介质的主要原因是其对头信息（headers）的动态查询支持较好，同等的替代产品还可以是Elastic Search这些。**
+注：选择MongoDB作为存储介质的主要原因是其对头信息（headers）的动态查询支持较好，同等的替代产品还可以是Elastic Search这些。
 
 <br />
 
@@ -95,3 +95,43 @@ if (!isOk)
     throw new Exception("The message is not reached to the server!");
 }
 ```
+
+<br />
+
+## 正常消费者(ComsumerA)
+
+1. 设置预取消息，避免公平轮训问题，可以根据需要设置预取消息数，这里是1
+
+```csharp
+_channel.BasicQos(0, 1, false);
+```
+
+2. 声明Exchange和Queue
+
+```csharp
+_channel.ExchangeDeclare("Exchange", "direct");
+_channel.QueueDeclare("QueueA", true, false, false);
+_channel.QueueBind("QueueA", "Exchange", "RouteA");
+```
+
+3. 编写回调函数
+
+```csharp
+var consumer = new EventingBasicConsumer(_channel);
+consumer.Received += (model, ea) =>
+{
+　　//The QueueA is always successful.
+　　try
+　　{
+    　　_channel.BasicAck(ea.DeliveryTag, false);
+　　}
+　　catch (AlreadyClosedException ex)
+　　{
+    　　_logger.LogCritical(ex, "RabbitMQ is closed!");
+　　}
+};
+
+_channel.BasicConsume("QueueA", false, consumer);
+```
+
+注：设置了RabbitMQ的断线恢复机制，当RabbitMQ连接不可用时，与MQ通讯的操作会抛出AlreadyClosedException的异常，导致主线程退出，哪怕连接恢复了，程序也无法恢复，因此，需要捕获处理该异常。
