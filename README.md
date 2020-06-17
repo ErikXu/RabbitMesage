@@ -135,3 +135,88 @@ _channel.BasicConsume("QueueA", false, consumer);
 ```
 
 注：设置了RabbitMQ的断线恢复机制，当RabbitMQ连接不可用时，与MQ通讯的操作会抛出AlreadyClosedException的异常，导致主线程退出，哪怕连接恢复了，程序也无法恢复，因此，需要捕获处理该异常。
+
+<br />
+
+## 异常消费者(ComsumerB)
+
+1. 设置预取消息
+
+```csharp
+_channel.BasicQos(0, 1, false);
+```
+
+2. 声明Exchange和Queue
+
+```csharp
+_channel.ExchangeDeclare("Exchange", "direct");
+_channel.QueueDeclare("QueueB", true, false, false);
+_channel.QueueBind("QueueB", "Exchange", "RouteB");
+```
+
+3.  设置死信交换机(Dead Letter Exchange)
+
+```csharp
+var retryDic = new Dictionary<string, object>
+{
+　　{"x-dead-letter-exchange", "Exchange"},
+　　{"x-dead-letter-routing-key", "RouteB"}
+};
+
+_channel.ExchangeDeclare("Exchange_Retry", "direct");
+_channel.QueueDeclare("QueueB_Retry", true, false, false, retryDic);
+_channel.QueueBind("QueueB_Retry", "Exchange_Retry", "RouteB_Retry");
+```
+
+4. 重试设置，3次重试；第一次1秒，第二次10秒，第三次30秒
+
+```csharp
+_retryTime = new List<int>
+{
+　　1 * 1000,
+　　10 * 1000,
+　　30 * 1000
+};
+```
+
+5. 获取当前重试次数
+
+```csharp
+var retryCount = 0;
+if (ea.BasicProperties.Headers != null && ea.BasicProperties.Headers.ContainsKey("retryCount"))
+{
+　　retryCount = (int)ea.BasicProperties.Headers["retryCount"];
+　　_logger.LogWarning($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}]Message:{ea.BasicProperties.MessageId}, {++retryCount} retry started...");
+}
+```
+
+6. 发生异常，判断是否可以重试
+
+```csharp
+private bool CanRetry(int retryCount)
+{
+　　return retryCount <= _retryTime.Count - 1;
+}
+```
+
+7. 可以重试，则启动重试机制
+
+```csharp
+private void SetupRetry(int retryCount, string retryExchange, string retryRoute, BasicDeliverEventArgs ea)
+{
+　　var body = ea.Body;
+　　var properties = ea.BasicProperties;
+　　properties.Headers = properties.Headers ?? new Dictionary<string, object>();
+　　properties.Headers["retryCount"] = retryCount;
+　　properties.Expiration = _retryTime[retryCount].ToString();
+
+　　try
+　　{
+    　　_channel.BasicPublish(retryExchange, retryRoute, properties, body);
+　　}
+　　catch (AlreadyClosedException ex)
+　　{
+    　　_logger.LogCritical(ex, "RabbitMQ is closed!");
+　　}
+}
+```
