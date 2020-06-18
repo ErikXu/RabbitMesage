@@ -220,3 +220,78 @@ private void SetupRetry(int retryCount, string retryExchange, string retryRoute,
 　　}
 }
 ```
+
+<br />
+
+## 审计消费者(Audit Comsumer)
+
+1. 声明Exchange和Queue
+
+```csharp
+_channel.ExchangeDeclare("Exchange", "direct");
+
+_channel.QueueDeclare("QueueAudit", true, false, false);
+_channel.QueueBind("QueueAudit", "Exchange", "RouteA");
+_channel.QueueBind("QueueAudit", "Exchange", "RouteB");
+```
+
+2. 排除死信Exchange转发过来的重复消息
+
+```csharp
+if (ea.BasicProperties.Headers == null || !ea.BasicProperties.Headers.ContainsKey("x-death"))
+{
+　　...
+}
+```
+
+3. 生成消息实体
+
+```csharp
+var message = new Message
+{
+　　MessageId = ea.BasicProperties.MessageId,
+　　Body = ea.Body,
+　　Exchange = ea.Exchange,
+　　Route = ea.RoutingKey
+};
+```
+
+4. RabbitMQ会用bytes来存储字符串，因此，要把头中bytes转回字符串
+
+```csharp
+if (ea.BasicProperties.Headers != null)
+{
+　　var headers = new Dictionary<string, object>();
+
+　　foreach (var header in ea.BasicProperties.Headers)
+　　{
+    　　if (header.Value is byte[] bytes)
+    　　{
+        　　headers[header.Key] = Encoding.UTF8.GetString(bytes);
+    　　}
+    　　else
+    　　{
+        　　headers[header.Key] = header.Value;
+    　　}
+　　}
+
+　　message.Headers = headers;
+}
+```
+
+5. 把Unix格式的Timestamp转成UTC时间
+
+```csharp
+if (ea.BasicProperties.Timestamp.UnixTime > 0)
+{
+　　message.TimestampUnix = ea.BasicProperties.Timestamp.UnixTime;
+　　var offset = DateTimeOffset.FromUnixTimeMilliseconds(ea.BasicProperties.Timestamp.UnixTime);
+　　message.Timestamp = offset.UtcDateTime;
+}
+```
+
+6. 消息存入MongoDB
+
+```csharp
+_mongoDbContext.Collection<Message>().InsertOne(message, cancellationToken: cancellationToken);
+```
