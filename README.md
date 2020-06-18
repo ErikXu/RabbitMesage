@@ -327,7 +327,7 @@ _mongoDbContext.Collection<Message>().InsertOne(message, cancellationToken: canc
   - 恢复所有绑定（Bindings）
   - 恢复所有消费者（Consumers）
   
-参考：[Automatic Recovery](https://www.rabbitmq.com/dotnet-api-guide.html#recovery
+参考：[Automatic Recovery](https://www.rabbitmq.com/dotnet-api-guide.html#recovery)
 
 <br />
 
