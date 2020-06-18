@@ -295,3 +295,60 @@ if (ea.BasicProperties.Timestamp.UnixTime > 0)
 ```csharp
 _mongoDbContext.Collection<Message>().InsertOne(message, cancellationToken: cancellationToken);
 ```
+
+<br />
+
+## Ack，Nack，Reject的关系
+
+- 消息处理成功，执行Ack，RabbitMQ会把消息从队列中删除
+
+- 消息处理失败，执行Nack或者Reject
+
+  - 当requeue=true时，消息会重新回到队列，然后当前消费者会马上再取回这条消息
+  - 当requeue=false时，如果Exchange有设置Dead Letter Exchange，则消息会去到Dead Letter Exchange
+  - 当requeue=false时，如果Exchange没设置Dead Letter Exchange，则消息从队列中删除，效果与Ack相同
+  
+- Nack与Reject的区别在于：Nack可以批量操作，Reject只能单条操作
+
+<br />
+
+## RabbitMQ自动恢复
+
+- 连接（Connection）恢复
+  - 重连（Reconnect）
+  - 恢复连接监听（Listeners）
+  - 重新打开通道（Channels）
+  - 恢复通道监听（Listeners）
+  - 恢复basic.qos，publisher confirms以及transaction设置
+  
+- 拓扑（Topology）恢复
+  - 重新声明交换机（Exchanges）
+  - 重新声明队列（Queues）
+  - 恢复所有绑定（Bindings）
+  - 恢复所有消费者（Consumers）
+  
+参考：[Automatic Recovery](https://www.rabbitmq.com/dotnet-api-guide.html#recovery
+
+<br />
+
+## 异常处理机制
+
+- 临时异常，如数据库网络闪断、http请求临时失效等
+
+  通过短时间重试（如1秒后）的方式处理，也可以考虑Nack/Reject来实现重试（时效性更高）。
+  
+- 时序异常，如A任务依赖于B任务，但可能由于调度或消费者分配的原因，导致A任务先于B任务执行
+
+  通过长时间重试（如1分钟、30分钟、1小时、1天等），等待B任务先执行完的方式处理。
+  
+- 业务异常，由于系统测试不充分，上线后发现某几个或某几种消息无法正常处理
+
+  等系统修正后，通过消息重发的方式处理。
+  
+- 系统异常，业务中间件无法正常操作，如网络中断、数据库宕机等
+
+  等系统恢复后，通过消息重发的方式处理。
+  
+- 非法异常，一些伪造、攻击类型的消息
+
+  多次重试失败后，消息从队列中被删除，也可以针对此业务做进一步处理。
